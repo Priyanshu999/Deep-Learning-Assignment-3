@@ -1,4 +1,4 @@
-[![Project Report](https://img.shields.io/badge/Project%20Report-Click%20Here-blue?style=for-the-badge)](https://wandb.ai/cs24m035-indian-institute-of-technology-madras/CS6910_Assignment2_final2/reports/DA6401-Assignment-2---VmlldzoxMjM2MTg1Nw?accessToken=069sem3p535rxsxdu7t6j3lzj1njtbgxtcxgss3xrusg0amhip5thk4fnwh38ucn)
+[![Project Report](https://img.shields.io/badge/Project%20Report-Click%20Here-blue?style=for-the-badge)](https://wandb.ai/cs24m035-indian-institute-of-technology-madras/DA6410-Assignment33/reports/DA6410-Assignment-3--VmlldzoxMjc5NjQ0Nw?accessToken=vth671vyuidnd4yz3s5n7avnx9nfj986mhr0t22goxvhcqhlcrc3pk6rw9lriew8)
 [![GitHub Repository](https://img.shields.io/badge/GitHub-Repository-black?style=for-the-badge&logo=github)](https://github.com/Priyanshu999/Deep-Learning-Assignment-3)
 
 # Project Repository 📂
