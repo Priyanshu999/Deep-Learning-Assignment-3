@@ -1,55 +1,86 @@
-# Import core libraries for deep learning and scientific computing, neural network building blocks
 import torch
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F #Functional Utilities
 import torch.optim as optim  #For Optimizer
-
-# Import libraries for data manipulation and analysis
 import pandas as pd
 import csv
-
-# Import libraries for progress monitoring and visualization
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from matplotlib.font_manager import FontProperties
-
-# Import libraries for logging and experimentation tracking
 import wandb  
-
-# Import libraries for utility functions
 import random  
 import heapq  
-
-# Import Libraries for tanking argument from command line
 import argparse
 
 # Import warnings
 import warnings
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument('-wp' , '--wandb_project', help='Project name used to track experiments in Weights & Biases dashboard' , type=str, default='DL-Assignment3')
-parser.add_argument('-we', '--wandb_entity' , help='Wandb Entity used to track experiments in the Weights & Biases dashboard.' , type=str, default='cs23m026')
-parser.add_argument('-d', '--datapath', help='give data path e.g. /kaggle/input/vocabs/Dataset', type=str, default='D:/DL_A3/Dataset')
-parser.add_argument('-l', '--lang', help='languge', type=str, default='hin')
-parser.add_argument('-e', '--epochs', help="Number of epochs to train network.", type=int, default=10)
-parser.add_argument('-b', '--batch_size', help="Batch size used to train network.", type=int, default=32)
-parser.add_argument('-dp', '--dropout', help="dropout probablity in Ecoder & Decoder", type=float, default=0.3)
-parser.add_argument('-nl', '--num_layers', help="number of layers in encoder & decoder", type=int, default=2)
-parser.add_argument('-bw', '--beam_width', help="Beam Width for beam Search", type=int, default=1)
-parser.add_argument('-cell', '--cell_type', help="Cell Type of Encoder and Decoder", type=str, default="LSTM", choices=["LSTM", "RNN", "GRU"])
-parser.add_argument('-emb_size', '--embadding_size', help="Embadding Size", type=int, default=256)
-parser.add_argument('-hdn_size', '--hidden_size', help="Hidden Size", type=int, default=512)
-parser.add_argument('-lp', '--length_penalty', help="Length Panelty", type=float, default=0.6)
-parser.add_argument('-bi_dir', '--bidirectional', help="Bidirectional", type=int, choices=[0, 1], default=1)
-parser.add_argument('-tfr', '--teacher_forcing_ratio', help="Teacher Forcing Ratio", type=float, default=0.5)
-parser.add_argument('-o', '--optimizer', help = 'choices: ["sgd", "adagrad", "adam", "rmsprop"]', type=str, default = 'adam', choices= ["sgd", "rmsprop", "adam", "adagrad"])
-parser.add_argument('-lr', '--learning_rate', help = 'Learning rate for training', type=float, default=0.001)
-parser.add_argument('-p', '--console', help='print training_accuracy + loss, validation_accuracy + loss for every epochs', choices=[0, 1], type=int, default=1)
-parser.add_argument('-wl', '--wandb_log', help='log on wandb', choices=[0, 1], type=int, default=0)
-parser.add_argument('-eval', '--evaluate', help='get test accuarcy and test loss', choices=[0, 1], type=int, default=1)
-parser.add_argument('-t_random', '--translate_random', help='get 10 Random words and their translations from test data', choices=[0, 1], type=int, default=0)
+import argparse
+
+def build_argument_parser():
+    parser = argparse.ArgumentParser(description="Train and evaluate a Seq2Seq model with attention")
+
+    # Weights & Biases configuration
+    wandb_args = {
+        '--wandb_project':  ('Project name used in WandB', 'DL-Assignment3', str),
+        '--wandb_entity':   ('WandB entity name', 'cs23m026', str),
+        '--wandb_log':      ('Enable WandB logging', 0, int, [0, 1])
+    }
+
+    # Dataset and language
+    data_args = {
+        '--datapath': ('Path to dataset folder', 'D:/DL_A3/Dataset', str),
+        '--lang':     ('Target language code', 'hin', str)
+    }
+
+    # Training hyperparameters
+    train_args = {
+        '--epochs':         ('Number of training epochs', 10, int),
+        '--batch_size':     ('Mini-batch size', 32, int),
+        '--learning_rate':  ('Learning rate', 0.001, float),
+        '--dropout':        ('Dropout rate', 0.3, float),
+        '--teacher_forcing_ratio': ('Teacher forcing ratio', 0.5, float),
+        '--optimizer':      ('Optimizer to use', 'adam', str, ['sgd', 'rmsprop', 'adam', 'adagrad'])
+    }
+
+    # Model architecture settings
+    arch_args = {
+        '--num_layers':     ('Layers in encoder/decoder', 2, int),
+        '--embadding_size': ('Embedding dimension', 256, int),
+        '--hidden_size':    ('Hidden layer size', 512, int),
+        '--cell_type':      ('RNN cell type', 'LSTM', str, ['LSTM', 'RNN', 'GRU']),
+        '--bidirectional':  ('Use bidirectional encoder?', 1, int, [0, 1])
+    }
+
+    # Evaluation and output controls
+    misc_args = {
+        '--beam_width':     ('Beam width for decoding', 1, int),
+        '--length_penalty': ('Penalty on sequence length', 0.6, float),
+        '--console':        ('Print training stats?', 1, int, [0, 1]),
+        '--evaluate':       ('Run on test set?', 1, int, [0, 1])
+    }
+
+    # Helper function to add arguments
+    def add_args(group, args_dict):
+        for arg, (desc, default, typ, *choices) in args_dict.items():
+            name = arg.replace('--', '')
+            if choices:
+                parser.add_argument(arg, f'-{name[0]}', help=desc, default=default, type=typ, choices=choices[0])
+            else:
+                parser.add_argument(arg, f'-{name[0]}', help=desc, default=default, type=typ)
+
+    add_args('wandb', wandb_args)
+    add_args('data', data_args)
+    add_args('train', train_args)
+    add_args('arch', arch_args)
+    add_args('misc', misc_args)
+
+    return parser
+
+parser = build_argument_parser()
+args = parser.parse_args()
 
 
 
@@ -779,186 +810,118 @@ def get_hyper_perameters(arguments, processed_data):
 
     return HYPER_PARAM
 
-# Function to get model accuracy and loss on test data
+# Function to evaluate model on test data
 def evaluate_model(params, model, device, processed_data):
-    """
-    Evaluates the model using beam search on test data and returns accuracy and correct predictions.
-
-    Args:
-        params : Hyper Parameters used for parameters
-        model (torch.nn.Module): The machine translation model to evaluate.
-        device (str): Device to use for computation (e.g., 'cpu' or 'cuda').
-        processed_data (dict): Preprocessed data dictionary.
-
-    Returns:
-        tuple: A tuple containing test accuracy (float) and correct predictions (int).
-    """
-
-# Set the model to evaluation mode
     model.eval()
+    correct = total = 0
 
-    # Disable gradient computation during inference
-    with torch.no_grad():
-        # Initialize counters
-        total_words = 0
-        correct_predictions = 0
-        
-        # Iterate through the validation data with tqdm progress bar
-        with tqdm(total=len(processed_data["test_x"]), desc='Evaluating Model') as pbar:
-            for word, target_word in zip(processed_data["test_x"], processed_data["test_y"]):
-                # Increment the total words counter
-                total_words += 1
-                
-                # Perform beam search to predict the next word
-                predicted_word = beam_search(params, model, word, device, processed_data)
-#                 print(target_word, predicted_word)
-                # Check if the predicted word matches the target word
-                if predicted_word == target_word[1:-1]:  # Remove start and end tokens
-                    correct_predictions += 1
-                
-                # Update the progress bar
-                pbar.update(1)
+    with torch.no_grad(), tqdm(total=len(processed_data["test_x"]), desc="Evaluating Model") as bar:
+        for source, target in zip(processed_data["test_x"], processed_data["test_y"]):
+            total += 1
+            predicted = beam_search(params, model, source, device, processed_data)
+            if predicted == target[1:-1]:
+                correct += 1
+            bar.update(1)
 
-    # Calculate accuracy
-    accuracy = correct_predictions / total_words
+    return correct / total, correct
 
-    # Return accuracy and number of correct predictions
-    return accuracy, correct_predictions
 
-# Function and their helpler function that print 10 random translated data from test data 
+# Helper to encode word to tensor using char map
 def encode_input(word, processed_data):
-    """
-    Encodes a word into a padded tensor using character-level mappings.
-    """
     max_len = processed_data["max_encoder_length"]
-    char_map = processed_data["input_corpus_dict"]
+    vocab = processed_data["input_corpus_dict"]
+    matrix = np.zeros((max_len + 1, 1), dtype=int)
 
-    tensor_data = np.zeros((max_len + 1, 1), dtype=int)
+    checksum = 0
+    for i, ch in enumerate(word):
+        idx = vocab.get(ch, 0)
+        matrix[i][0] = idx
+        checksum ^= idx  # meaningless operation
+    matrix[i + 1][0] = vocab['$']
 
-    # Random accumulator (useless)
-    _unused_checksum = 0
-    for idx, ch in enumerate(word):
-        tensor_data[idx, 0] = char_map.get(ch, 0)
-        _unused_checksum ^= tensor_data[idx, 0]  # meaningless XOR
-
-    tensor_data[idx + 1, 0] = char_map['$']
-    tensor_final = torch.tensor(tensor_data, dtype=torch.int64).to(device)
-
-    return tensor_final
+    return torch.tensor(matrix, dtype=torch.int64).to(device)
 
 
+# Model forward pass to get prediction and attention
 def generate_predictions(model, word, PARAM, device, processed_data):
-    """
-    Runs the model on a given word and returns predicted sequence with attention.
-    """
-    in_map = processed_data["input_corpus_dict"]
-    out_map = processed_data["output_corpus_dict"]
-    rev_map = processed_data["reversed_output_corpus"]
-    max_len = processed_data["max_encoder_length"]
+    vocab_in = processed_data["input_corpus_dict"]
+    vocab_out = processed_data["output_corpus_dict"]
+    rev_vocab = processed_data["reversed_output_corpus"]
+    max_enc_len = processed_data["max_encoder_length"]
 
-    enc_input = encode_input(word, processed_data).to(device)
+    x = encode_input(word, processed_data).to(device)
 
-    # Encoder pass
-    encoder_states, h, c = None, None, None
+    enc_output, hidden, context = None, None, None
     with torch.no_grad():
-        if PARAM['cell_type'] == 'LSTM':
-            encoder_states, h, c = model.encoder(enc_input)
-            c = c[:PARAM["num_layers"]]
+        if PARAM["cell_type"] == "LSTM":
+            enc_output, hidden, context = model.encoder(x)
+            context = context[:PARAM["num_layers"]]
         else:
-            encoder_states, h = model.encoder(enc_input)
-    h = h[:PARAM["num_layers"]]
+            enc_output, hidden = model.encoder(x)
+    hidden = hidden[:PARAM["num_layers"]]
 
-    # Decoder initialization
-    current_token = torch.tensor([out_map['#']]).to(device)
-    attention_store = torch.zeros(max_len + 1, 1, max_len + 1)
-    generated = ""
+    token = torch.tensor([vocab_out['#']]).to(device)
+    attention_map = torch.zeros(max_enc_len + 1, 1, max_enc_len + 1)
+    output_seq = ""
 
-    # Decoding loop
-    for t in range(1, len(out_map)):
-        if PARAM['cell_type'] == 'LSTM':
-            output, h, c, attn = model.decoder(current_token, encoder_states, h, c)
+    for step in range(1, len(vocab_out)):
+        if PARAM["cell_type"] == "LSTM":
+            logits, hidden, context, attention = model.decoder(token, enc_output, hidden, context)
         else:
-            output, h, attn = model.decoder(current_token, encoder_states, h, None)
+            logits, hidden, attention = model.decoder(token, enc_output, hidden, None)
 
-        pred_index = output.argmax(dim=1).item()
-        pred_char = rev_map[pred_index]
-        attention_store[t] = attn
+        top_idx = logits.argmax(dim=1).item()
+        char = rev_vocab[top_idx]
+        attention_map[step] = attention
 
-        if pred_char == '$':
+        if char == '$':
             break
-        generated += pred_char
+        output_seq += char
+        token = torch.tensor([top_idx]).to(device)
 
-        current_token = torch.tensor([pred_index]).to(device)
+        if step == 1 and top_idx == 0:
+            _ = float(torch.sum(attention))
 
-        # Dummy logic: fake noise threshold
-        if t == 1 and pred_index == 0:
-            _ = torch.sum(attn).item()  # misleading op
-
-    return generated, attention_store[:t + 1]
+    return output_seq, attention_map[:step + 1]
 
 
-
+# Select random 9 test words and generate predictions
 def random_test_words(processed_data, model, HYPER_PARAM, device):
-    """
-    Generate predictions and attention maps for a random set of test words.
+    chosen = random.sample(list(processed_data["test_x"]), 9)
+    translations = {}
+    attns = {}
 
-    Args:
-        processed_data (dict): Dictionary containing preprocessed test data.
-        model (torch.nn.Module): The trained model for prediction.
-        HYPER_PARAM (dict): Dictionary containing model hyperparameters.
-        device (torch.device): Device on which the model will run (e.g., CPU or GPU).
+    for item in chosen:
+        cleaned = item[:-1]
+        result, attn_map = generate_predictions(model, cleaned, HYPER_PARAM, device, processed_data)
+        translations[cleaned] = ' ' + result
+        attns[cleaned] = attn_map
 
-    Returns:
-        translation_dict (dict): Dictionary containing word-to-predicted-translation mapping.
-        attention_dict (dict): Dictionary containing attention matrices for each translation.
-    """
-    random_words = random.sample(list(processed_data["test_x"]), 9)
-    translation_dict, attention_dict = {}, {}
-    
-    for word_pair in random_words:
-        # Get prediction and attention for each word
-        input_word = word_pair[:-1]  # Remove end-of-sentence marker
-        pred, attention = generate_predictions(model, input_word, HYPER_PARAM, device, processed_data)
-        
-        # Store translation and attention for the word
-        translation_dict[input_word] = ' ' + pred
-        attention_dict[input_word] = attention
-    
-    return translation_dict, attention_dict
+    return translations, attns
 
 
-# Main Function
+# Entry point
 if __name__ == "__main__":
-    # Suppress all warnings
     warnings.filterwarnings("ignore")
 
-    # Get arguments from command line
-    arguments = parser.parse_args()
-
-    # Function call set avilable device (GPU/ CPU)
+    args = parser.parse_args()
     device = set_device()
 
-    # Get Data
-    processed_data = preprocess_data(arguments.datapath, arguments.lang)
+    data = preprocess_data(args.datapath, args.lang)
+    params = get_hyper_perameters(args, data)
 
-    # Hyper Parameter Dict 
-    params = get_hyper_perameters(arguments, processed_data)
+    model, _ = training(params, data, device, wandb_log=args.wandb_log)
 
-    # Train the Model 
-    model, acc = training(params, processed_data, device, wandb_log = arguments.wandb_log)
+    if args.evaluate:
+        acc, correct = evaluate_model(params, model, device, data)
+        total = len(data["test_x"])
+        print(f"Test Accuracy : {acc * 100:.4f}, Correct_pred : {correct}/{total}")
 
-    # Evaluate Model 
-    if arguments.evaluate:
-        accuracy, correct_pred = evaluate_model(params, model, device, processed_data)
-        total_words = len(processed_data["test_x"])
-        msg = f"Test Accuracy : {accuracy*100:.4f}, Correct_pred : {correct_pred}/{total_words}"
-        print(msg)
-
-    if arguments.translate_random:
+    if args.translate_random:
         print("10 Random Words Translated from Test Data")
-        translation_dict, _ = random_test_words(processed_data, model, params, device)
-        for key in translation_dict.keys():
-            msg = f"{key} ==> {translation_dict[key]}"
-            print(msg)
+        preds, _ = random_test_words(data, model, params, device)
+        for k in preds:
+            print(f"{k} ==> {preds[k]}")
+
     
     
