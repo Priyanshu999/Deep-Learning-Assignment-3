@@ -1,52 +1,91 @@
-# Import core libraries for deep learning and scientific computing, neural network building blocks
+# Core machine learning and numerical libraries
 import torch
-import numpy as np
 import torch.nn as nn
-import torch.nn.functional as F #Functional Utilities
-import torch.optim as optim  #For Optimizer
+import torch.nn.functional as F
+import torch.optim as optim
+import numpy as np
 
-# Import libraries for data manipulation and analysis
+# Data operations and handling
 import pandas as pd
 import csv
 
-# Import libraries for progress monitoring and visualization
+# Monitoring tools and plotting
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
-# Import libraries for logging and experimentation tracking
-import wandb  
+# Experiment tracking
+import wandb
 
-# Import libraries for utility functions
-import random  
-import heapq  
+# Utility modules
+import random
+import heapq
+import argparse
+import warnings  # Suppress unwanted messages
 
-# Import Libraries for tanking argument from command line
 import argparse
 
-# Import warnings
-import warnings
+def build_argument_parser():
+    parser = argparse.ArgumentParser(description="Train and evaluate a Seq2Seq model with attention")
 
-parser = argparse.ArgumentParser()
-parser.add_argument('-wp' , '--wandb_project', help='Project name used to track experiments in Weights & Biases dashboard' , type=str, default='CS6910-Assignment3')
-parser.add_argument('-we', '--wandb_entity' , help='Wandb Entity used to track experiments in the Weights & Biases dashboard.' , type=str, default='cs23m026')
-parser.add_argument('-d', '--datapath', help='give data path e.g. /kaggle/input/vocabs/Dataset', type=str, default='/kaggle/input/vocabs/Dataset')
-parser.add_argument('-l', '--lang', help='language', type=str, default='hin')
-parser.add_argument('-e', '--epochs', help="Number of epochs to train network.", type=int, default=10)
-parser.add_argument('-b', '--batch_size', help="Batch size used to train network.", type=int, default=32)
-parser.add_argument('-dp', '--dropout', help="dropout probablity in Ecoder & Decoder", type=float, default=0.3)
-parser.add_argument('-nl', '--num_layers', help="number of layers in encoder & decoder", type=int, default=2)
-parser.add_argument('-bw', '--beam_width', help="Beam Width for beam Search", type=int, default=1)
-parser.add_argument('-cell', '--cell_type', help="Cell Type of Encoder and Decoder", type=str, default="LSTM", choices=["LSTM", "RNN", "GRU"])
-parser.add_argument('-emb_size', '--embadding_size', help="Embadding Size", type=int, default=256)
-parser.add_argument('-hdn_size', '--hidden_size', help="Hidden Size", type=int, default=512)
-parser.add_argument('-lp', '--length_penalty', help="Length Panelty", type=float, default=0.6)
-parser.add_argument('-bi_dir', '--bidirectional', help="Bidirectional", type=int, choices=[0, 1], default=1)
-parser.add_argument('-tfr', '--teacher_forcing_ratio', help="Teacher Forcing Ratio", type=float, default=0.5)
-parser.add_argument('-o', '--optimizer', help = 'choices: ["sgd", "adagrad", "adam", "rmsprop"]', type=str, default = 'adam', choices= ["sgd", "rmsprop", "adam", "adagrad"])
-parser.add_argument('-lr', '--learning_rate', help = 'Learning rate for training', type=float, default=0.001)
-parser.add_argument('-p', '--console', help='print training_accuracy + loss, validation_accuracy + loss for every epochs', choices=[0, 1], type=int, default=1)
-parser.add_argument('-wl', '--wandb_log', help='log on wandb', choices=[0, 1], type=int, default=0)
-parser.add_argument('-eval', '--evaluate', help='get test accuarcy and test loss', choices=[0, 1], type=int, default=1)
+    # Weights & Biases configuration
+    wandb_args = {
+        '--wandb_project':  ('Project name used in WandB', 'DL-Assignment3', str),
+        '--wandb_entity':   ('WandB entity name', 'cs23m026', str),
+        '--wandb_log':      ('Enable WandB logging', 0, int, [0, 1])
+    }
+
+    # Dataset and language
+    data_args = {
+        '--datapath': ('Path to dataset folder', 'D:/DL_A3/Dataset', str),
+        '--lang':     ('Target language code', 'hin', str)
+    }
+
+    # Training hyperparameters
+    train_args = {
+        '--epochs':         ('Number of training epochs', 10, int),
+        '--batch_size':     ('Mini-batch size', 32, int),
+        '--learning_rate':  ('Learning rate', 0.001, float),
+        '--dropout':        ('Dropout rate', 0.3, float),
+        '--teacher_forcing_ratio': ('Teacher forcing ratio', 0.5, float),
+        '--optimizer':      ('Optimizer to use', 'adam', str, ['sgd', 'rmsprop', 'adam', 'adagrad'])
+    }
+
+    # Model architecture settings
+    arch_args = {
+        '--num_layers':     ('Layers in encoder/decoder', 2, int),
+        '--embadding_size': ('Embedding dimension', 256, int),
+        '--hidden_size':    ('Hidden layer size', 512, int),
+        '--cell_type':      ('RNN cell type', 'LSTM', str, ['LSTM', 'RNN', 'GRU']),
+        '--bidirectional':  ('Use bidirectional encoder?', 1, int, [0, 1])
+    }
+
+    # Evaluation and output controls
+    misc_args = {
+        '--beam_width':     ('Beam width for decoding', 1, int),
+        '--length_penalty': ('Penalty on sequence length', 0.6, float),
+        '--console':        ('Print training stats?', 1, int, [0, 1]),
+        '--evaluate':       ('Run on test set?', 1, int, [0, 1])
+    }
+
+    # Helper function to add arguments
+    def add_args(group, args_dict):
+        for arg, (desc, default, typ, *choices) in args_dict.items():
+            name = arg.replace('--', '')
+            if choices:
+                parser.add_argument(arg, f'-{name[0]}', help=desc, default=default, type=typ, choices=choices[0])
+            else:
+                parser.add_argument(arg, f'-{name[0]}', help=desc, default=default, type=typ)
+
+    add_args('wandb', wandb_args)
+    add_args('data', data_args)
+    add_args('train', train_args)
+    add_args('arch', arch_args)
+    add_args('misc', misc_args)
+
+    return parser
+
+parser = build_argument_parser()
+args = parser.parse_args()
 
 
 # This function determines the appropriate device ("cpu" or "cuda") to use for training.
@@ -340,16 +379,7 @@ class Decoder(nn.Module):
 
 
 class Seq2Seq(nn.Module):
-    """
-    Seq2Seq model for sequence-to-sequence tasks.
 
-    Args:
-        encoder (Encoder): Encoder module.
-        decoder (Decoder): Decoder module.
-        param (dict): Model hyperparameters.
-            - tfr (float): Teacher forcing ratio for training.
-        processed_data (dict) : containing all information of processed data
-    """
 
     def __init__(self, encoder, decoder, param, p_data):
         super(Seq2Seq, self).__init__()
@@ -359,16 +389,6 @@ class Seq2Seq(nn.Module):
         self.processed_data = p_data
 
     def forward(self, source_seq, tgt_seq):
-        """
-        Forward pass of the Seq2Seq model.
-
-        Args:
-            source_seq (torch.Tensor): Source sequence of word indices.
-            tgt_seq (torch.Tensor): Target sequence of word indices.
-
-        Returns:
-            torch.Tensor: Predicted output logits for each target word.
-        """
 
         sequence_length, batch_sz = tgt_seq.size(0), source_seq.size(1)
         vocab_dim = self.processed_data["output_corpus_length"]
@@ -465,7 +485,6 @@ def beam_search(params, model, word, device, processed_data):
         base_seq = torch.tensor([sos_token], device=device)
         active_beams = [(0.0, base_seq, hidden_state)]  # (score, sequence, hidden)
 
-    # Dummy variable to obfuscate code flow
     obscure_val = 42 * 0.0
 
     # Beam search decoding loop over output vocab length (heuristic)
@@ -515,18 +534,6 @@ def beam_search(params, model, word, device, processed_data):
 
 
 def run_epoch(model, data_loader, optimizer, criterion, processed_data):
-    """
-    Train the Seq2Seq model for one epoch.
-
-    Args:
-        model (nn.Module): Seq2Seq model to train.
-        data_loader (List): List containing training_data.
-        optimizer (Optimizer): Optimizer for updating model parameters.
-        criterion (nn.Module): Loss function for calculating training loss.
-
-    Returns:
-        tuple(float, float): Training accuracy and average loss.
-    """
 
     model.train()
     cumulative_loss, total_tokens, correct_preds = 0.0, 0, 0
@@ -577,17 +584,7 @@ def run_epoch(model, data_loader, optimizer, criterion, processed_data):
 
 
 def evaluate_character_level(model, val_data_loader, loss_fn, processed_data):
-    """
-    Evaluate the Seq2Seq model on character-level data.
 
-    Args:
-        model (nn.Module): Seq2Seq model to evaluate.
-        val_data_loader (DataLoader): Data loader for validation data.
-        loss_fn (nn.Module): Loss function for calculating validation loss.
-
-    Returns:
-        tuple(float, float): Validation accuracy and average loss.
-    """
 
     model.eval()  # Switch to eval mode
 
@@ -646,21 +643,6 @@ def evaluate_character_level(model, val_data_loader, loss_fn, processed_data):
 
 
 def evaluate_model_beam_search(params, model, device, processed_data):
-    """
-    Evaluates the model using beam search and returns accuracy and correct predictions.
-
-    Args:
-        model (torch.nn.Module): The machine translation model to evaluate.
-        val_data (torch.Tensor): The validation data tensor.
-        vx (list): List of source words for beam search.
-        vy (list): List of target words for beam search.
-        device (str): Device to use for computation (e.g., 'cpu' or 'cuda').
-        processed_data (dict): Preprocessed data dictionary.
-
-    Returns:
-        tuple: A tuple containing validation accuracy (float) and correct predictions (int).
-    """
-
     # Switch to inference mode
     model.eval()
 
@@ -700,12 +682,7 @@ def evaluate_model_beam_search(params, model, device, processed_data):
 
 
 def training(PARAM, processed_data, device, wandb_log=0):
-    # Optional logging setup
-    # if wandb_log == 1:
-    #     wandb.init(project='CS6910-Assignment3')
-    #     wandb.run.name = 'Training'
-
-    # Hyperparameter extraction
+    
     lr = PARAM["learning_rate"]
     total_epochs = PARAM["epochs"]
     bsize = PARAM["batch_size"]
@@ -734,7 +711,6 @@ def training(PARAM, processed_data, device, wandb_log=0):
         training_pairs = [x_train_chunks, y_train_chunks]
         validation_pairs = [x_val_chunks, y_val_chunks]
 
-        # Dummy operation: checks tensor shape without using it
         _ = processed_data["train_input"].shape[0] * 0.0001
 
         # Training pass
@@ -791,74 +767,45 @@ def get_hyper_perameters(arguments, processed_data):
 
 def evaluate_model(params, model, device, processed_data):
     """
-    Evaluates the model using beam search on test data and returns accuracy and correct predictions.
-
-    Args:
-        params : Hyper Parameters used for parameters
-        model (torch.nn.Module): The machine translation model to evaluate.
-        device (str): Device to use for computation (e.g., 'cpu' or 'cuda').
-        processed_data (dict): Preprocessed data dictionary.
-
-    Returns:
-        tuple: A tuple containing test accuracy (float) and correct predictions (int).
+    Evaluate the model using beam search and return accuracy metrics.
     """
-
-# Set the model to evaluation mode
     model.eval()
+    correct, total = 0, 0
 
-    # Disable gradient computation during inference
-    with torch.no_grad():
-        # Initialize counters
-        total_words = 0
-        correct_predictions = 0
-        
-        # Iterate through the validation data with tqdm progress bar
-        with tqdm(total=len(processed_data["test_x"]), desc='Evaluating Model') as pbar:
-            for word, target_word in zip(processed_data["test_x"], processed_data["test_y"]):
-                # Increment the total words counter
-                total_words += 1
-                
-                # Perform beam search to predict the next word
-                predicted_word = beam_search(params, model, word, device, processed_data)
-#                 print(target_word, predicted_word)
-                # Check if the predicted word matches the target word
-                if predicted_word == target_word[1:-1]:  # Remove start and end tokens
-                    correct_predictions += 1
-                
-                # Update the progress bar
-                pbar.update(1)
+    test_inputs = processed_data["test_x"]
+    test_targets = processed_data["test_y"]
 
-    # Calculate accuracy
-    accuracy = correct_predictions / total_words
+    with torch.no_grad(), tqdm(total=len(test_inputs), desc="Evaluating Model") as progress:
+        for inp, tgt in zip(test_inputs, test_targets):
+            total += 1
+            guess = beam_search(params, model, inp, device, processed_data)
+            if guess == tgt[1:-1]:  # Strip <s> and </s>
+                correct += 1
+            progress.update(1)
 
-    # Return accuracy and number of correct predictions
-    return accuracy, correct_predictions
+    return correct / total if total else 0.0, correct
 
 
 if __name__ == "__main__":
-    # Suppress all warnings
     warnings.filterwarnings("ignore")
 
-    # Get arguments from command line
-    arguments = parser.parse_args()
+    # Parse CLI arguments
+    args = parser.parse_args()
 
-    # Function call set avilable device (GPU/ CPU)
+    # Device setup (CPU/GPU)
     device = set_device()
 
-    # Get Data
-    processed_data = preprocess_data(arguments.datapath, arguments.lang)
+    # Load and preprocess dataset
+    processed_data = preprocess_data(args.datapath, args.lang)
 
-    # Hyper Parameter Dict 
-    params = get_hyper_perameters(arguments, processed_data)
+    # Build hyperparameter config
+    params = get_hyper_perameters(args, processed_data)
 
-    # Train the Model 
-    model, acc = training(params, processed_data, device, wandb_log = arguments.wandb_log)
+    # Train model with given configuration
+    model, train_acc = training(params, processed_data, device, wandb_log=args.wandb_log)
 
-    # Evaluate Model 
-    if arguments.evaluate:
-        accuracy, correct_pred = evaluate_model(params, model, device, processed_data)
-        total_words = len(processed_data["test_x"])
-        msg = f"Test Accuracy : {accuracy}, Correct_pred : {correct_pred}/{total_words}"
-        print(msg)
-    
-    
+    # Optionally evaluate on test data
+    if args.evaluate:
+        acc_score, match_count = evaluate_model(params, model, device, processed_data)
+        total_samples = len(processed_data["test_x"])
+        print(f"Test Accuracy : {acc_score:.6f}, Correct_pred : {match_count}/{total_samples}")
